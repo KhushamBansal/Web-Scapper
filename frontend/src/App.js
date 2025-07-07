@@ -21,6 +21,36 @@ const App = () => {
   const [knowledgeBase, setKnowledgeBase] = useState([]);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
 
+  const handleBulkScrape = async () => {
+    if (!bulkUrl || !teamId) {
+      setError('Please enter both URL and Team ID');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setResult(null);
+    setBulkResult(null);
+
+    try {
+      const response = await axios.post(`${API}/bulk-scrape`, {
+        url: bulkUrl,
+        team_id: teamId,
+        user_id: userId || null,
+        max_depth: 1,
+        max_links: maxLinks,
+        include_base_url: includeBaseUrl
+      });
+
+      setBulkResult(response.data);
+      setBulkUrl('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to bulk scrape content');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUrlScrape = async () => {
     if (!url || !teamId) {
       setError('Please enter both URL and Team ID');
