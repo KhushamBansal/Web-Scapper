@@ -30,6 +30,9 @@ from urllib.parse import urlparse, urljoin, urlunparse
 import re
 from typing import Set, Dict, Any
 
+# Gemini AI
+import google.generativeai as genai
+
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
