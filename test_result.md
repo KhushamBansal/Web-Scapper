@@ -152,6 +152,18 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "Both GET and POST /api/status endpoints are working correctly. Status checks are properly stored and retrieved from the database."
+        
+  - task: "Bulk scraping functionality"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "The POST /api/bulk-scrape endpoint is working correctly. Successfully tested with multiple blog homepages (python.org/blogs/, fastapi.tiangolo.com, dev.to). The endpoint correctly discovers and scrapes multiple articles from these pages. Tested with different max_links values (3 and 5) and verified that the correct number of items are scraped. The response format matches the user's specification with team_id and items array containing properly formatted content. Error handling for invalid URLs works as expected, returning an empty items array."
 
 frontend:
   - task: "Frontend implementation"
@@ -169,7 +181,7 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
@@ -178,6 +190,7 @@ test_plan:
     - "URL scraping endpoint"
     - "Knowledge base retrieval"
     - "Status endpoints"
+    - "Bulk scraping functionality"
   stuck_tasks: []
   test_all: true
   test_priority: "high_first"
@@ -185,3 +198,5 @@ test_plan:
 agent_communication:
     -agent: "testing"
     -message: "I've completed testing of all backend API endpoints. All endpoints are working correctly. The URL scraping functionality works well with most websites, but some sites with strict scraping protection may not work. The knowledge base retrieval and status endpoints are functioning as expected. No critical issues were found."
+    -agent: "testing"
+    -message: "I've completed testing of the new bulk scraping functionality. The POST /api/bulk-scrape endpoint is working correctly and can discover and scrape multiple articles from blog homepages. The endpoint correctly handles different max_links values and returns the expected response format. Error handling for invalid URLs works as expected. All tests are passing."
