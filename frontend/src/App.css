@@ -1,38 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 .App {
-    text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Custom scrollbar for result preview */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
 }
 
-.App-link {
-    color: #61dafb;
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* Loading animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Gradient background enhancement */
+.bg-gradient-to-br {
+  background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
+}
+
+/* Enhanced focus states */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Button hover effects */
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease-in-out;
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* Card hover effects */
+.bg-white:hover {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s ease-in-out;
+}
+
+/* File input styling */
+input[type="file"] {
+  padding: 8px;
+  border: 2px dashed #d1d5db;
+  background: #f9fafb;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+}
+
+input[type="file"]:hover {
+  border-color: #6b7280;
+  background: #f3f4f6;
+}
+
+/* Tab styling improvements */
+.border-b-2 {
+  border-bottom-width: 2px;
+  transition: all 0.2s ease-in-out;
+}
+
+/* Success/Error message styling */
+.bg-green-50 {
+  background-color: #f0fdf4;
+}
+
+.bg-red-50 {
+  background-color: #fef2f2;
+}
+
+/* Content preview styling */
+pre {
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1.5;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  .grid-cols-1 {
+    grid-template-columns: 1fr;
+  }
+  
+  .text-4xl {
+    font-size: 2.5rem;
+  }
 }
