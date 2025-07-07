@@ -22,8 +22,8 @@ USER_ID = "test-user-456"
 
 # Test URLs
 TEST_URLS = [
-    "https://medium.com/@addyosmani/the-cost-of-javascript-in-2023-c5e4d8e31f35",  # Medium article
-    "https://dev.to/codesphere/how-to-use-chatgpt-to-build-a-full-stack-web-app-in-10-minutes-4pgn",  # Dev.to article
+    "https://www.python.org/about/",  # Simple website
+    "https://fastapi.tiangolo.com/tutorial/",  # Technical documentation
     "https://martinfowler.com/articles/patterns-of-distributed-systems/leader-follower.html"  # Technical blog
 ]
 
