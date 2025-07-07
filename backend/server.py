@@ -297,7 +297,7 @@ class ContentScraper:
                 downloaded = trafilatura.fetch_url(url)
                 if downloaded:
                     text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
-                    if text and len(text.strip()) > 100:
+                    if text and len(text.strip()) > 50:  # Lower threshold
                         content_markdown = self._clean_and_convert_to_markdown(text)
                         word_count = len(text.split())
                         
@@ -305,6 +305,8 @@ class ContentScraper:
                         metadata = trafilatura.extract_metadata(downloaded)
                         title = metadata.title if metadata and metadata.title else self._extract_title_from_url(url)
                         author = metadata.author if metadata and metadata.author else None
+                        
+                        logging.info(f"Trafilatura extracted {word_count} words from {url}")
                         
                         return ScrapedContent(
                             title=title,
