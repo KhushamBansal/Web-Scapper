@@ -335,10 +335,12 @@ class ContentScraper:
                 title = doc.title()
                 content_html = doc.summary()
                 
-                if content_html and len(content_html.strip()) > 100:
+                if content_html and len(content_html.strip()) > 50:  # Lower threshold
                     content_markdown = self.h.handle(content_html)
                     content_markdown = self._clean_markdown(content_markdown)
                     word_count = len(content_markdown.split())
+                    
+                    logging.info(f"Readability extracted {word_count} words from {url}")
                     
                     return ScrapedContent(
                         title=title or self._extract_title_from_url(url),
