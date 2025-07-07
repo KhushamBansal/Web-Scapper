@@ -110,6 +110,144 @@ class ContentScraper:
         self.h.ignore_images = False
         self.h.body_width = 0
         
+        # Initialize Gemini model
+        self.gemini_model = None
+        if gemini_api_key:
+            try:
+                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                logging.info("Gemini model initialized successfully")
+            except Exception as e:
+                logging.warning(f"Failed to initialize Gemini model: {e}")
+    
+    def _enhance_content_with_gemini(self, raw_content: str, url: str) -> Dict[str, Any]:
+        """
+        Use Gemini AI to enhance and categorize content
+        """
+        try:
+            if not self.gemini_model or not raw_content.strip():
+                return {"content": raw_content, "category": "blog", "enhanced": False}
+            
+            prompt = f"""
+            Analyze and enhance this web content. Return a JSON response with:
+            1. "content": Clean, well-formatted markdown content (preserve all important information)
+            2. "category": Content type (blog, tutorial, news, documentation, guide, research, podcast_transcript, linkedin_post, reddit_comment, book, other)
+            3. "title": Improved title if needed
+            4. "author": Extract author name if mentioned
+            5. "summary": Brief 2-3 sentence summary
+            
+            URL: {url}
+            
+            Raw Content:
+            {raw_content[:8000]}  # Limit to avoid token limits
+            
+            Return only valid JSON:
+            """
+            
+            response = self.gemini_model.generate_content(prompt)
+            
+            if response and response.text:
+                # Try to parse JSON response
+                import json
+                try:
+                    result = json.loads(response.text.strip())
+                    result["enhanced"] = True
+                    return result
+                except json.JSONDecodeError:
+                    # If not JSON, try to extract content between JSON markers
+                    text = response.text.strip()
+                    if "```json" in text:
+                        json_start = text.find("```json") + 7
+                        json_end = text.find("```", json_start)
+                        if json_end > json_start:
+                            try:
+                                result = json.loads(text[json_start:json_end])
+                                result["enhanced"] = True
+                                return result
+                            except:
+                                pass
+                    
+                    # Fallback: return enhanced content as markdown
+                    return {
+                        "content": text,
+                        "category": "blog", 
+                        "enhanced": True,
+                        "title": None,
+                        "author": None,
+                        "summary": None
+                    }
+                    
+        except Exception as e:
+            logging.warning(f"Gemini enhancement failed: {e}")
+        
+        return {"content": raw_content, "category": "blog", "enhanced": False}
+    
+    def _extract_content_with_gemini(self, url: str) -> Dict[str, Any]:
+        """
+        Use Gemini as a fallback to extract content when traditional methods fail
+        """
+        try:
+            if not self.gemini_model:
+                return None
+            
+            # Get raw HTML
+            response = requests.get(url, timeout=30, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            response.raise_for_status()
+            
+            # Limit HTML size to avoid token limits
+            html_content = response.text[:15000]
+            
+            prompt = f"""
+            Extract the main content from this HTML webpage and return clean markdown. 
+            Focus on the article/blog content, ignore navigation, ads, comments, etc.
+            
+            URL: {url}
+            
+            Return JSON with:
+            {{
+                "title": "Article title",
+                "content": "Full article content in markdown format",
+                "author": "Author name if found",
+                "category": "content type (blog, tutorial, news, etc.)"
+            }}
+            
+            HTML:
+            {html_content}
+            """
+            
+            ai_response = self.gemini_model.generate_content(prompt)
+            
+            if ai_response and ai_response.text:
+                import json
+                try:
+                    result = json.loads(ai_response.text.strip())
+                    return result
+                except json.JSONDecodeError:
+                    # Try to extract JSON from response
+                    text = ai_response.text.strip()
+                    if "```json" in text:
+                        json_start = text.find("```json") + 7
+                        json_end = text.find("```", json_start)
+                        if json_end > json_start:
+                            try:
+                                return json.loads(text[json_start:json_end])
+                            except:
+                                pass
+                    
+                    # Fallback: treat as markdown content
+                    return {
+                        "title": self._extract_title_from_url(url),
+                        "content": text,
+                        "author": None,
+                        "category": "blog"
+                    }
+                    
+        except Exception as e:
+            logging.warning(f"Gemini extraction failed for {url}: {e}")
+        
+        return None
+        
     def _is_valid_blog_link(self, url: str, base_domain: str) -> bool:
         """
         Check if a URL is likely a blog post or article link
