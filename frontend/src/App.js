@@ -439,7 +439,65 @@ const App = () => {
               </div>
             )}
 
-            {/* Result Display */}
+            {/* Bulk Result Display */}
+            {bulkResult && (
+              <div className="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-md">
+                <h3 className="font-semibold text-purple-800 mb-2">
+                  🎉 Bulk Scraping Complete! ({bulkResult.items.length} items found)
+                </h3>
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {bulkResult.items.map((item, index) => (
+                    <div key={item.id} className="bg-white p-3 rounded border">
+                      <div className="flex justify-between items-start mb-2">
+                        <h4 className="font-medium text-gray-800 text-sm">
+                          {index + 1}. {item.title}
+                        </h4>
+                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs">
+                          {item.content_type}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-600 mb-2">
+                        <span>{item.word_count} words</span>
+                        <span className="ml-2">via {item.extraction_method}</span>
+                        {item.source_url && (
+                          <a
+                            href={item.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-2 text-blue-600 hover:underline"
+                          >
+                            Source
+                          </a>
+                        )}
+                      </div>
+                      <p className="text-gray-700 text-xs">
+                        {truncateContent(item.content, 100)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 p-3 bg-gray-50 rounded">
+                  <p className="text-sm text-gray-700">
+                    <strong>JSON Output Format:</strong>
+                  </p>
+                  <pre className="text-xs text-gray-600 mt-1 overflow-x-auto">
+{JSON.stringify({
+  team_id: bulkResult.team_id,
+  items: bulkResult.items.map(item => ({
+    title: item.title,
+    content: "Markdown content...",
+    content_type: item.content_type,
+    source_url: item.source_url,
+    author: item.author,
+    user_id: item.user_id
+  }))
+}, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Single Result Display */}
             {result && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-md">
                 <h3 className="font-semibold text-green-800 mb-2">
