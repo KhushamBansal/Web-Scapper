@@ -31,7 +31,7 @@ TEST_URLS = [
 BULK_TEST_URLS = [
     "https://www.python.org/blogs/",  # Blog homepage with multiple article links
     "https://fastapi.tiangolo.com/",  # Technical documentation with multiple links
-    "https://martinfowler.com/articles/",  # Technical blog archive page
+    "https://dev.to/",  # Developer blog site with many articles
 ]
 
 def test_root_endpoint():
