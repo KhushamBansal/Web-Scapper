@@ -274,9 +274,11 @@ class ContentScraper:
                 article.download()
                 article.parse()
                 
-                if article.text and len(article.text.strip()) > 100:
+                if article.text and len(article.text.strip()) > 50:  # Lower threshold
                     content_markdown = self._clean_and_convert_to_markdown(article.text)
                     word_count = len(article.text.split())
+                    
+                    logging.info(f"Newspaper3k extracted {word_count} words from {url}")
                     
                     return ScrapedContent(
                         title=article.title or self._extract_title_from_url(url),
