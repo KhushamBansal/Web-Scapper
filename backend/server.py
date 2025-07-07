@@ -414,32 +414,32 @@ class ContentScraper:
         
     async def scrape_url(self, url: str, team_id: str, user_id: Optional[str] = None, content_type: str = "blog") -> ScrapedContent:
         """
-        Scrape content from a URL using multiple methods for best results
+        Scrape content from a URL using multiple methods for best results, enhanced with Gemini AI
         """
         try:
+            best_content = None
+            best_word_count = 0
+            extraction_methods_tried = []
+            
             # Method 1: Try newspaper3k first
             try:
                 article = Article(url)
                 article.download()
                 article.parse()
                 
-                if article.text and len(article.text.strip()) > 50:  # Lower threshold
-                    content_markdown = self._clean_and_convert_to_markdown(article.text)
+                if article.text and len(article.text.strip()) > 50:
                     word_count = len(article.text.split())
-                    
+                    if word_count > best_word_count:
+                        best_content = {
+                            "title": article.title or self._extract_title_from_url(url),
+                            "content": article.text,
+                            "author": ", ".join(article.authors) if article.authors else None,
+                            "method": "newspaper3k",
+                            "word_count": word_count
+                        }
+                        best_word_count = word_count
+                    extraction_methods_tried.append("newspaper3k")
                     logging.info(f"Newspaper3k extracted {word_count} words from {url}")
-                    
-                    return ScrapedContent(
-                        title=article.title or self._extract_title_from_url(url),
-                        content=content_markdown,
-                        content_type=content_type,
-                        source_url=url,
-                        author=", ".join(article.authors) if article.authors else None,
-                        user_id=user_id,
-                        team_id=team_id,
-                        word_count=word_count,
-                        extraction_method="newspaper3k"
-                    )
             except Exception as e:
                 logging.warning(f"Newspaper3k failed for {url}: {e}")
             
@@ -448,32 +448,28 @@ class ContentScraper:
                 downloaded = trafilatura.fetch_url(url)
                 if downloaded:
                     text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
-                    if text and len(text.strip()) > 50:  # Lower threshold
-                        content_markdown = self._clean_and_convert_to_markdown(text)
+                    if text and len(text.strip()) > 50:
                         word_count = len(text.split())
-                        
-                        # Try to extract metadata
-                        metadata = trafilatura.extract_metadata(downloaded)
-                        title = metadata.title if metadata and metadata.title else self._extract_title_from_url(url)
-                        author = metadata.author if metadata and metadata.author else None
-                        
+                        if word_count > best_word_count:
+                            # Try to extract metadata
+                            metadata = trafilatura.extract_metadata(downloaded)
+                            title = metadata.title if metadata and metadata.title else self._extract_title_from_url(url)
+                            author = metadata.author if metadata and metadata.author else None
+                            
+                            best_content = {
+                                "title": title,
+                                "content": text,
+                                "author": author,
+                                "method": "trafilatura",
+                                "word_count": word_count
+                            }
+                            best_word_count = word_count
+                        extraction_methods_tried.append("trafilatura")
                         logging.info(f"Trafilatura extracted {word_count} words from {url}")
-                        
-                        return ScrapedContent(
-                            title=title,
-                            content=content_markdown,
-                            content_type=content_type,
-                            source_url=url,
-                            author=author,
-                            user_id=user_id,
-                            team_id=team_id,
-                            word_count=word_count,
-                            extraction_method="trafilatura"
-                        )
             except Exception as e:
                 logging.warning(f"Trafilatura failed for {url}: {e}")
             
-            # Method 3: Fallback to requests + readability
+            # Method 3: Try requests + readability
             try:
                 response = requests.get(url, timeout=30, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -484,28 +480,81 @@ class ContentScraper:
                 title = doc.title()
                 content_html = doc.summary()
                 
-                if content_html and len(content_html.strip()) > 50:  # Lower threshold
-                    content_markdown = self.h.handle(content_html)
-                    content_markdown = self._clean_markdown(content_markdown)
-                    word_count = len(content_markdown.split())
+                if content_html and len(content_html.strip()) > 50:
+                    content_text = self.h.handle(content_html)
+                    content_text = self._clean_markdown(content_text)
+                    word_count = len(content_text.split())
                     
+                    if word_count > best_word_count:
+                        best_content = {
+                            "title": title or self._extract_title_from_url(url),
+                            "content": content_text,
+                            "author": None,
+                            "method": "readability",
+                            "word_count": word_count
+                        }
+                        best_word_count = word_count
+                    extraction_methods_tried.append("readability")
                     logging.info(f"Readability extracted {word_count} words from {url}")
-                    
-                    return ScrapedContent(
-                        title=title or self._extract_title_from_url(url),
-                        content=content_markdown,
-                        content_type=content_type,
-                        source_url=url,
-                        author=None,
-                        user_id=user_id,
-                        team_id=team_id,
-                        word_count=word_count,
-                        extraction_method="readability"
-                    )
             except Exception as e:
                 logging.warning(f"Readability method failed for {url}: {e}")
             
-            raise Exception("All extraction methods failed")
+            # Method 4: Gemini AI Fallback (if other methods failed or returned poor results)
+            if not best_content or best_word_count < 100:
+                try:
+                    gemini_result = self._extract_content_with_gemini(url)
+                    if gemini_result and gemini_result.get("content"):
+                        word_count = len(gemini_result["content"].split())
+                        if word_count > best_word_count:
+                            best_content = {
+                                "title": gemini_result.get("title") or self._extract_title_from_url(url),
+                                "content": gemini_result["content"],
+                                "author": gemini_result.get("author"),
+                                "method": "gemini-ai",
+                                "word_count": word_count
+                            }
+                            best_word_count = word_count
+                            content_type = gemini_result.get("category", content_type)
+                        extraction_methods_tried.append("gemini-ai")
+                        logging.info(f"Gemini AI extracted {word_count} words from {url}")
+                except Exception as e:
+                    logging.warning(f"Gemini AI extraction failed for {url}: {e}")
+            
+            if not best_content:
+                raise Exception(f"All extraction methods failed. Tried: {', '.join(extraction_methods_tried)}")
+            
+            # Enhance content with Gemini if available and content is decent
+            enhanced_result = self._enhance_content_with_gemini(best_content["content"], url)
+            if enhanced_result.get("enhanced"):
+                # Use Gemini enhancements
+                final_content = enhanced_result.get("content", best_content["content"])
+                final_title = enhanced_result.get("title") or best_content["title"]
+                final_author = enhanced_result.get("author") or best_content["author"]
+                final_content_type = enhanced_result.get("category", content_type)
+                extraction_method = f"{best_content['method']}+gemini"
+            else:
+                # Use original extraction
+                final_content = self._clean_and_convert_to_markdown(best_content["content"])
+                final_title = best_content["title"]
+                final_author = best_content["author"]
+                final_content_type = content_type
+                extraction_method = best_content["method"]
+            
+            final_word_count = len(final_content.split())
+            
+            logging.info(f"Final extraction: {final_word_count} words via {extraction_method}")
+            
+            return ScrapedContent(
+                title=final_title,
+                content=final_content,
+                content_type=final_content_type,
+                source_url=url,
+                author=final_author,
+                user_id=user_id,
+                team_id=team_id,
+                word_count=final_word_count,
+                extraction_method=extraction_method
+            )
             
         except Exception as e:
             logging.error(f"Failed to scrape {url}: {e}")
