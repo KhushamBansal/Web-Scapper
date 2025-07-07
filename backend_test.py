@@ -16,8 +16,8 @@ with open('/app/frontend/.env', 'r') as f:
 BACKEND_URL = BACKEND_URL.strip('"\'')
 API_URL = urljoin(BACKEND_URL, '/api')
 
-# Test parameters
-TEAM_ID = "test-team-123"
+# Test parameters - using the user-specified team_id
+TEAM_ID = "aline123"
 USER_ID = "test-user-456"
 
 # Test URLs
@@ -25,6 +25,13 @@ TEST_URLS = [
     "https://www.python.org/about/",  # Simple website
     "https://fastapi.tiangolo.com/tutorial/",  # Technical documentation
     "https://martinfowler.com/articles/patterns-of-distributed-systems/leader-follower.html"  # Technical blog
+]
+
+# Test URLs for bulk scraping (pages with multiple links)
+BULK_TEST_URLS = [
+    "https://www.python.org/blogs/",  # Blog homepage with multiple article links
+    "https://fastapi.tiangolo.com/",  # Technical documentation with multiple links
+    "https://martinfowler.com/articles/",  # Technical blog archive page
 ]
 
 def test_root_endpoint():
