@@ -99,6 +99,170 @@ class ContentScraper:
         self.h.ignore_images = False
         self.h.body_width = 0
         
+    def _is_valid_blog_link(self, url: str, base_domain: str) -> bool:
+        """
+        Check if a URL is likely a blog post or article link
+        """
+        try:
+            parsed = urlparse(url)
+            
+            # Skip non-HTTP links
+            if not parsed.scheme in ['http', 'https']:
+                return False
+            
+            # Skip external domains (optional - you can modify this)
+            if parsed.netloc and parsed.netloc != base_domain:
+                return False
+            
+            # Skip common non-article paths
+            skip_patterns = [
+                r'/tag/', r'/category/', r'/author/', r'/search/',
+                r'/about', r'/contact', r'/privacy', r'/terms',
+                r'/wp-admin/', r'/wp-content/', r'/feed',
+                r'\.css$', r'\.js$', r'\.png$', r'\.jpg$', r'\.jpeg$', r'\.gif$', r'\.pdf$',
+                r'#', r'mailto:', r'tel:', r'javascript:',
+                r'/page/\d+', r'/\d{4}/$', r'/\d{4}/\d{2}/$'  # pagination and date archives
+            ]
+            
+            for pattern in skip_patterns:
+                if re.search(pattern, url, re.IGNORECASE):
+                    return False
+            
+            # Look for positive indicators
+            article_patterns = [
+                r'/\d{4}/\d{2}/\d{2}/',  # Date-based URLs
+                r'/posts?/', r'/articles?/', r'/blog/',
+                r'/\d+/', r'/[a-zA-Z0-9-]+/$'  # Slug-based URLs
+            ]
+            
+            for pattern in article_patterns:
+                if re.search(pattern, url, re.IGNORECASE):
+                    return True
+            
+            # Default: if it has a meaningful path (not just domain), consider it
+            if parsed.path and len(parsed.path) > 1 and not parsed.path.endswith('/'):
+                return True
+                
+            return False
+            
+        except Exception:
+            return False
+    
+    def _extract_links_from_content(self, html_content: str, base_url: str) -> List[str]:
+        """
+        Extract potential blog/article links from HTML content
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            links = []
+            base_domain = urlparse(base_url).netloc
+            
+            # Find all links
+            for link in soup.find_all('a', href=True):
+                href = link.get('href')
+                if not href:
+                    continue
+                
+                # Convert relative URLs to absolute
+                full_url = urljoin(base_url, href)
+                
+                # Check if it's a valid blog link
+                if self._is_valid_blog_link(full_url, base_domain):
+                    links.append(full_url)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_links = []
+            for link in links:
+                if link not in seen:
+                    seen.add(link)
+                    unique_links.append(link)
+            
+            return unique_links
+            
+        except Exception as e:
+            logging.warning(f"Failed to extract links from content: {e}")
+            return []
+    
+    async def bulk_scrape_with_links(self, url: str, team_id: str, user_id: Optional[str] = None, 
+                                   max_depth: int = 1, max_links: int = 10, 
+                                   include_base_url: bool = True) -> BulkScrapeResponse:
+        """
+        Scrape a URL and discover/follow links to scrape additional content
+        """
+        scraped_items = []
+        processed_urls = set()
+        
+        try:
+            # Step 1: Scrape the base URL
+            if include_base_url:
+                try:
+                    base_content = await self.scrape_url(url, team_id, user_id, "blog")
+                    scraped_items.append(base_content)
+                    processed_urls.add(url)
+                except Exception as e:
+                    logging.warning(f"Failed to scrape base URL {url}: {e}")
+            
+            # Step 2: Extract links from the base URL
+            if max_depth > 0 and max_links > 0:
+                try:
+                    # Get HTML content for link extraction
+                    response = requests.get(url, timeout=30, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    })
+                    response.raise_for_status()
+                    
+                    # Extract links
+                    discovered_links = self._extract_links_from_content(response.text, url)
+                    
+                    # Limit the number of links to process
+                    discovered_links = discovered_links[:max_links]
+                    
+                    # Step 3: Scrape discovered links
+                    for link in discovered_links:
+                        if link in processed_urls:
+                            continue
+                        
+                        try:
+                            # Determine content type based on URL
+                            content_type = "blog"
+                            if "podcast" in link.lower():
+                                content_type = "podcast_transcript"
+                            elif "linkedin" in link.lower():
+                                content_type = "linkedin_post"
+                            elif "reddit" in link.lower():
+                                content_type = "reddit_comment"
+                            
+                            link_content = await self.scrape_url(link, team_id, user_id, content_type)
+                            scraped_items.append(link_content)
+                            processed_urls.add(link)
+                            
+                            # Small delay to be respectful to servers
+                            await asyncio.sleep(0.5)
+                            
+                        except Exception as e:
+                            logging.warning(f"Failed to scrape discovered link {link}: {e}")
+                            continue
+                    
+                except Exception as e:
+                    logging.warning(f"Failed to extract links from {url}: {e}")
+            
+            # Step 4: Save all scraped content to database
+            for item in scraped_items:
+                try:
+                    await db.scraped_content.insert_one(item.dict())
+                except Exception as e:
+                    logging.warning(f"Failed to save item {item.id} to database: {e}")
+            
+            return BulkScrapeResponse(
+                team_id=team_id,
+                items=scraped_items
+            )
+            
+        except Exception as e:
+            logging.error(f"Bulk scraping failed for {url}: {e}")
+            raise HTTPException(status_code=500, detail=f"Bulk scraping failed: {str(e)}")
+        
     async def scrape_url(self, url: str, team_id: str, user_id: Optional[str] = None, content_type: str = "blog") -> ScrapedContent:
         """
         Scrape content from a URL using multiple methods for best results
