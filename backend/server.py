@@ -496,6 +496,29 @@ async def get_status_checks():
 
 
 # New scraping routes
+@api_router.post("/bulk-scrape", response_model=BulkScrapeResponse)
+async def bulk_scrape_endpoint(request: BulkScrapeRequest):
+    """
+    Scrape a URL and discover/follow links to scrape additional content
+    """
+    try:
+        result = await scraper.bulk_scrape_with_links(
+            url=request.url,
+            team_id=request.team_id,
+            user_id=request.user_id,
+            max_depth=request.max_depth,
+            max_links=request.max_links,
+            include_base_url=request.include_base_url
+        )
+        
+        return result
+    
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulk scraping failed: {str(e)}")
+
+
 @api_router.post("/scrape-url", response_model=ScrapeResponse)
 async def scrape_url_endpoint(request: ScrapeUrlRequest):
     """
