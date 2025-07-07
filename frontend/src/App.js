@@ -267,7 +267,7 @@ const App = () => {
               </button>
             </div>
 
-            {/* URL Scraping Tab */}
+            {/* Single URL Scraping Tab */}
             {activeTab === 'url' && (
               <div className="space-y-4">
                 <div>
@@ -287,10 +287,65 @@ const App = () => {
                   disabled={loading}
                   className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'Scraping...' : 'Scrape URL'}
+                  {loading ? 'Scraping...' : 'Scrape Single URL'}
                 </button>
                 <p className="text-sm text-gray-600">
-                  Supports most blogs including Medium, Substack, personal blogs, and technical documentation.
+                  Scrape a single URL without following links.
+                </p>
+              </div>
+            )}
+
+            {/* Bulk Scraping Tab */}
+            {activeTab === 'bulk' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter URL to scrape with link discovery
+                  </label>
+                  <input
+                    type="url"
+                    value={bulkUrl}
+                    onChange={(e) => setBulkUrl(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="https://example.com/blog-homepage"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Max Links to Follow
+                    </label>
+                    <input
+                      type="number"
+                      value={maxLinks}
+                      onChange={(e) => setMaxLinks(parseInt(e.target.value) || 10)}
+                      min="1"
+                      max="50"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="includeBaseUrl"
+                      checked={includeBaseUrl}
+                      onChange={(e) => setIncludeBaseUrl(e.target.checked)}
+                      className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                    />
+                    <label htmlFor="includeBaseUrl" className="text-sm font-medium text-gray-700">
+                      Include base URL
+                    </label>
+                  </div>
+                </div>
+                <button
+                  onClick={handleBulkScrape}
+                  disabled={loading}
+                  className="bg-purple-600 text-white px-6 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Discovering & Scraping...' : 'Bulk Scrape with Links'}
+                </button>
+                <p className="text-sm text-gray-600">
+                  🔥 <strong>Smart Discovery:</strong> Automatically finds and scrapes blog posts, articles, and guides linked from the main page. Perfect for blog homepages, archive pages, or resource collections.
                 </p>
               </div>
             )}
