@@ -485,7 +485,7 @@ const App = () => {
   team_id: bulkResult.team_id,
   items: bulkResult.items.map(item => ({
     title: item.title,
-    content: "Markdown content...",
+    content: item.content.length > 200 ? item.content.substring(0, 200) + "..." : item.content,
     content_type: item.content_type,
     source_url: item.source_url,
     author: item.author,
