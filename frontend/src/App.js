@@ -477,9 +477,36 @@ const App = () => {
                   ))}
                 </div>
                 <div className="mt-4 p-3 bg-gray-50 rounded">
-                  <p className="text-sm text-gray-700">
-                    <strong>JSON Output Format:</strong>
-                  </p>
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-sm text-gray-700">
+                      <strong>JSON Output Format (Preview):</strong>
+                    </p>
+                    <button
+                      onClick={() => {
+                        const fullJson = {
+                          team_id: bulkResult.team_id,
+                          items: bulkResult.items.map(item => ({
+                            title: item.title,
+                            content: item.content,
+                            content_type: item.content_type,
+                            source_url: item.source_url,
+                            author: item.author,
+                            user_id: item.user_id
+                          }))
+                        };
+                        const blob = new Blob([JSON.stringify(fullJson, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `scraped-content-${bulkResult.team_id}-${Date.now()}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                    >
+                      Download Full JSON
+                    </button>
+                  </div>
                   <pre className="text-xs text-gray-600 mt-1 overflow-x-auto">
 {JSON.stringify({
   team_id: bulkResult.team_id,
