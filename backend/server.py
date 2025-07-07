@@ -26,8 +26,9 @@ from bs4 import BeautifulSoup
 import html2text
 from readability import Document
 import requests
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse
 import re
+from typing import Set, Dict, Any
 
 
 ROOT_DIR = Path(__file__).parent
