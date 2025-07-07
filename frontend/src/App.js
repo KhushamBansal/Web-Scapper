@@ -8,11 +8,15 @@ const API = `${BACKEND_URL}/api`;
 const App = () => {
   const [activeTab, setActiveTab] = useState('url');
   const [url, setUrl] = useState('');
+  const [bulkUrl, setBulkUrl] = useState('');
+  const [maxLinks, setMaxLinks] = useState(10);
+  const [includeBaseUrl, setIncludeBaseUrl] = useState(true);
   const [file, setFile] = useState(null);
   const [teamId, setTeamId] = useState('team-demo-123');
   const [userId, setUserId] = useState('user-demo-456');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [bulkResult, setBulkResult] = useState(null);
   const [error, setError] = useState('');
   const [knowledgeBase, setKnowledgeBase] = useState([]);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
