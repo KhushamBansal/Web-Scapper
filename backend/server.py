@@ -79,6 +79,18 @@ class ScrapeResponse(BaseModel):
     message: str
     data: Optional[ScrapedContent] = None
 
+class BulkScrapeRequest(BaseModel):
+    url: str
+    team_id: str
+    user_id: Optional[str] = None
+    max_depth: int = 1  # How deep to follow links
+    max_links: int = 10  # Maximum number of links to follow
+    include_base_url: bool = True  # Whether to include the original URL in results
+
+class BulkScrapeResponse(BaseModel):
+    team_id: str
+    items: List[ScrapedContent]
+
 
 class ContentScraper:
     def __init__(self):
