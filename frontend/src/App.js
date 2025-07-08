@@ -20,6 +20,10 @@ const App = () => {
   const [error, setError] = useState('');
   const [knowledgeBase, setKnowledgeBase] = useState([]);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [scrapyUrl, setScrapyUrl] = useState('');
+  const [scrapyMaxLinks, setScrapyMaxLinks] = useState(10);
+  const [scrapyResult, setScrapyResult] = useState(null);
+  const [scrapyLogs, setScrapyLogs] = useState(null);
 
   const handleBulkScrape = async () => {
     if (!bulkUrl || !teamId) {
@@ -104,8 +108,10 @@ const App = () => {
         }
       });
 
+      console.log('PDF Extract Response:', response.data); // Debug log
+
       if (response.data.success) {
-        setResult(response.data.data);
+        setResult(response.data.items);
         setFile(null);
         // Reset file input
         const fileInput = document.getElementById('pdfFile');
@@ -115,6 +121,32 @@ const App = () => {
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to extract PDF content');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScrapyCrawl = async () => {
+    if (!scrapyUrl) {
+      setError('Please enter a URL for Scrapy Gemini Crawl');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setScrapyResult(null);
+    setScrapyLogs(null);
+    try {
+      const response = await axios.post(`${API}/scrapy-crawl`, null, {
+        params: {
+          url: scrapyUrl,
+          max_links: scrapyMaxLinks
+        }
+      });
+      setScrapyResult(response.data.results);
+      setScrapyLogs({stdout: response.data.scrapy_stdout, stderr: response.data.scrapy_stderr});
+      setScrapyUrl('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to run Scrapy Gemini Crawl');
     } finally {
       setLoading(false);
     }
@@ -264,6 +296,16 @@ const App = () => {
                 onClick={() => setActiveTab('knowledge')}
               >
                 Knowledge Base
+              </button>
+              <button
+                className={`py-2 px-4 font-medium ${
+                  activeTab === 'scrapy'
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setActiveTab('scrapy')}
+              >
+                Scrapy Gemini Crawl
               </button>
             </div>
 
@@ -432,6 +474,112 @@ const App = () => {
               </div>
             )}
 
+            {/* Scrapy Gemini Crawl Tab */}
+            {activeTab === 'scrapy' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter URL to crawl with Scrapy + Gemini
+                  </label>
+                  <input
+                    type="url"
+                    value={scrapyUrl}
+                    onChange={(e) => setScrapyUrl(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="https://example.com/blog-homepage"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Max Links to Follow
+                  </label>
+                  <input
+                    type="number"
+                    value={scrapyMaxLinks}
+                    onChange={(e) => setScrapyMaxLinks(parseInt(e.target.value) || 10)}
+                    min="1"
+                    max="50"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={handleScrapyCrawl}
+                  disabled={loading}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Crawling...' : 'Run Scrapy Gemini Crawl'}
+                </button>
+                <p className="text-sm text-gray-600">
+                  🚀 <strong>High-Performance Crawl:</strong> Uses Scrapy for fast crawling and Gemini for smart link filtering.
+                </p>
+                {scrapyResult && (
+                  <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <h3 className="font-semibold text-blue-800 mb-2">
+                      Scrapy Gemini Crawl Results ({scrapyResult.length} items found)
+                    </h3>
+                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                      {scrapyResult.map((item, idx) => (
+                        <div key={item.url + idx} className="bg-white p-3 rounded border">
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-medium text-gray-800 text-sm">
+                              {idx + 1}. {item.title}
+                            </h4>
+                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
+                              {item.category}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-600 mb-2">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-2 text-blue-600 hover:underline"
+                            >
+                              Source
+                            </a>
+                          </div>
+                          <p className="text-gray-700 text-xs">
+                            {truncateContent(item.content, 100)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 p-3 bg-gray-50 rounded">
+                      <div className="flex justify-between items-center mb-2">
+                        <p className="text-sm text-gray-700">
+                          <strong>JSON Output (Preview):</strong>
+                        </p>
+                        <button
+                          onClick={() => {
+                            const blob = new Blob([JSON.stringify(scrapyResult, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `scrapy-gemini-results-${Date.now()}.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                        >
+                          Download JSON
+                        </button>
+                      </div>
+                      <pre className="text-xs text-gray-600 mt-1 overflow-x-auto">
+{JSON.stringify(scrapyResult, null, 2)}
+                      </pre>
+                    </div>
+                    {scrapyLogs && (
+                      <div className="mt-4 p-3 bg-gray-100 rounded">
+                        <h4 className="font-semibold text-gray-700 mb-2">Scrapy Logs</h4>
+                        <pre className="text-xs text-gray-600 overflow-x-auto max-h-40">{scrapyLogs.stdout || ''}
+{scrapyLogs.stderr || ''}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Error Display */}
             {error && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
@@ -512,7 +660,8 @@ const App = () => {
   team_id: bulkResult.team_id,
   items: bulkResult.items.map(item => ({
     title: item.title,
-    content: item.content.length > 200 ? item.content.substring(0, 200) + "..." : item.content,
+    // content: item.content.length > 200 ? item.content.substring(0, 200) + "..." : item.content,
+    content: item.content,
     content_type: item.content_type,
     source_url: item.source_url,
     author: item.author,
@@ -525,25 +674,71 @@ const App = () => {
             )}
 
             {/* Single Result Display */}
-            {result && (
+            {Array.isArray(result) && result.length > 0 && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-md">
                 <h3 className="font-semibold text-green-800 mb-2">
-                  Content Extracted Successfully!
+                  PDF Content Extracted and Chunked! ({result.length} sections)
                 </h3>
-                <div className="text-sm text-green-700">
-                  <p><strong>Title:</strong> {result.title}</p>
-                  <p><strong>Word Count:</strong> {result.word_count}</p>
-                  <p><strong>Method:</strong> {result.extraction_method}</p>
-                  {result.author && <p><strong>Author:</strong> {result.author}</p>}
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {result.map((item, idx) => (
+                    <div key={idx} className="bg-white p-3 rounded border">
+                      <div className="font-bold text-gray-800 mb-1">{item.title}</div>
+                      <pre className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {truncateContent(item.content, 500)}
+                      </pre>
+                    </div>
+                  ))}
                 </div>
-                <div className="mt-3">
-                  <p className="font-medium text-green-800">Content Preview:</p>
-                  <div className="bg-white p-3 rounded border mt-2 max-h-40 overflow-y-auto">
-                    <pre className="text-sm text-gray-700 whitespace-pre-wrap">
-                      {truncateContent(result.content, 500)}
-                    </pre>
+                {/* JSON Output Preview for PDF */}
+                <div className="mt-4 p-3 bg-gray-50 rounded">
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-sm text-gray-700">
+                      <strong>JSON Output Format (Preview):</strong>
+                    </p>
+                    <button
+                      onClick={() => {
+                        const fullJson = {
+                          items: result.map(item => ({
+                            title: item.title,
+                            content: item.content,
+                            content_type: item.content_type,
+                            source_url: item.source_url,
+                            author: item.author,
+                            user_id: item.user_id
+                          }))
+                        };
+                        const blob = new Blob([JSON.stringify(fullJson, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `pdf-chunks-${Date.now()}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                    >
+                      Download Full JSON
+                    </button>
                   </div>
+                  <pre className="text-xs text-gray-600 mt-1 overflow-x-auto">
+{JSON.stringify({
+  items: result.map(item => ({
+    title: item.title,
+    content: item.content,
+    content_type: item.content_type,
+    source_url: item.source_url,
+    author: item.author,
+    user_id: item.user_id
+  }))
+}, null, 2)}
+                  </pre>
                 </div>
+              </div>
+            )}
+            {/* Show message if no content extracted */}
+            {Array.isArray(result) && result.length === 0 && (
+              <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                <p className="text-yellow-800">No content could be extracted from this PDF.</p>
               </div>
             )}
           </div>

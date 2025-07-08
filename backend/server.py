@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -7,13 +7,15 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uuid
 from datetime import datetime
 import tempfile
 import asyncio
 import aiofiles
 import json
+import io
+import re
 
 # Scraping libraries
 import newspaper
@@ -27,11 +29,12 @@ import html2text
 from readability import Document
 import requests
 from urllib.parse import urlparse, urljoin, urlunparse
-import re
-from typing import Set, Dict, Any
+import requests
+from typing import Set, Any
 
 # Gemini AI
 import google.generativeai as genai
+import subprocess
 
 
 ROOT_DIR = Path(__file__).parent
@@ -114,7 +117,7 @@ class ContentScraper:
         self.gemini_model = None
         if gemini_api_key:
             try:
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash-lite')
                 logging.info("Gemini model initialized successfully")
             except Exception as e:
                 logging.warning(f"Failed to initialize Gemini model: {e}")
@@ -250,50 +253,51 @@ class ContentScraper:
         
     def _is_valid_blog_link(self, url: str, base_domain: str) -> bool:
         """
-        Check if a URL is likely a blog post or article link
+        Use Gemini API to decide if a URL is likely a blog post or article link. Fallback to old logic if Gemini is unavailable.
         """
         try:
+            # Use Gemini if available
+            if self.gemini_model:
+                prompt = f"""
+                Given the following URL and base domain, decide if the URL is likely a blog post, article, or guide (not a homepage, tag, category, or resource page). Return true or false as JSON.
+                Base domain: {base_domain}
+                URL: {url}
+                Respond with: {{"is_blog_link": true}} or {{"is_blog_link": false}}
+                """
+                response = self.gemini_model.generate_content(prompt)
+                if response and response.text:
+                    import json
+                    try:
+                        result = json.loads(response.text.strip().split('\n')[0])
+                        return bool(result.get("is_blog_link", False))
+                    except Exception:
+                        pass
+            # Fallback to old logic
             parsed = urlparse(url)
-            
-            # Skip non-HTTP links
             if not parsed.scheme in ['http', 'https']:
                 return False
-            
-            # Skip external domains (optional - you can modify this)
-            if parsed.netloc and parsed.netloc != base_domain:
-                return False
-            
-            # Skip common non-article paths
             skip_patterns = [
                 r'/tag/', r'/category/', r'/author/', r'/search/',
                 r'/about', r'/contact', r'/privacy', r'/terms',
                 r'/wp-admin/', r'/wp-content/', r'/feed',
                 r'\.css$', r'\.js$', r'\.png$', r'\.jpg$', r'\.jpeg$', r'\.gif$', r'\.pdf$',
                 r'#', r'mailto:', r'tel:', r'javascript:',
-                r'/page/\d+', r'/\d{4}/$', r'/\d{4}/\d{2}/$'  # pagination and date archives
+                r'/page/\d+', r'/\d{4}/$', r'/\d{4}/\d{2}/$'
             ]
-            
             for pattern in skip_patterns:
                 if re.search(pattern, url, re.IGNORECASE):
                     return False
-            
-            # Look for positive indicators
             article_patterns = [
                 r'/\d{4}/\d{2}/\d{2}/',  # Date-based URLs
                 r'/posts?/', r'/articles?/', r'/blog/',
                 r'/\d+/', r'/[a-zA-Z0-9-]+/$'  # Slug-based URLs
             ]
-            
             for pattern in article_patterns:
                 if re.search(pattern, url, re.IGNORECASE):
                     return True
-            
-            # Default: if it has a meaningful path (not just domain), consider it
             if parsed.path and len(parsed.path) > 1 and not parsed.path.endswith('/'):
                 return True
-                
             return False
-            
         except Exception:
             return False
     
@@ -341,7 +345,7 @@ class ContentScraper:
         """
         scraped_items = []
         processed_urls = set()
-        
+        link_decisions = []
         try:
             # Step 1: Scrape the base URL
             if include_base_url:
@@ -351,63 +355,71 @@ class ContentScraper:
                     processed_urls.add(url)
                 except Exception as e:
                     logging.warning(f"Failed to scrape base URL {url}: {e}")
-            
-            # Step 2: Extract links from the base URL
+            # Step 2: Extract all links from the base URL (no filtering)
             if max_depth > 0 and max_links > 0:
                 try:
-                    # Get HTML content for link extraction
                     response = requests.get(url, timeout=30, headers={
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                     })
                     response.raise_for_status()
-                    
-                    # Extract links
-                    discovered_links = self._extract_links_from_content(response.text, url)
-                    
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    all_links = []
+                    for link in soup.find_all('a', href=True):
+                        href = link.get('href')
+                        if not href:
+                            continue
+                        full_url = urljoin(url, href)
+                        if full_url not in all_links:
+                            all_links.append(full_url)
                     # Limit the number of links to process
-                    discovered_links = discovered_links[:max_links]
-                    
-                    # Step 3: Scrape discovered links
-                    for link in discovered_links:
+                    all_links = all_links[:max_links]
+                    # Step 3: Use Gemini to check if each link is an article/blog/guide
+                    for link in all_links:
                         if link in processed_urls:
                             continue
-                        
-                        try:
-                            # Determine content type based on URL
-                            content_type = "blog"
-                            if "podcast" in link.lower():
-                                content_type = "podcast_transcript"
-                            elif "linkedin" in link.lower():
-                                content_type = "linkedin_post"
-                            elif "reddit" in link.lower():
-                                content_type = "reddit_comment"
-                            
-                            link_content = await self.scrape_url(link, team_id, user_id, content_type)
-                            scraped_items.append(link_content)
-                            processed_urls.add(link)
-                            
-                            # Small delay to be respectful to servers
-                            await asyncio.sleep(0.5)
-                            
-                        except Exception as e:
-                            logging.warning(f"Failed to scrape discovered link {link}: {e}")
-                            continue
-                    
+                        is_article = False
+                        if self.gemini_model:
+                            prompt = f"""
+                            Is the following URL likely to be a blog post, article, or guide (not a homepage, tag, category, or resource page)? Return true or false as JSON.\nURL: {link}\nRespond with: {{\"is_blog_link\": true}} or {{\"is_blog_link\": false}}"""
+                            response = self.gemini_model.generate_content(prompt)
+                            if response and response.text:
+                                import json
+                                try:
+                                    result = json.loads(response.text.strip().split('\n')[0])
+                                    is_article = bool(result.get("is_blog_link", False))
+                                except Exception:
+                                    pass
+                        # Save decision for debugging/inspection
+                        link_decisions.append({"url": link, "is_article": is_article})
+                        if is_article:
+                            try:
+                                content_type = "blog"
+                                if "podcast" in link.lower():
+                                    content_type = "podcast_transcript"
+                                elif "linkedin" in link.lower():
+                                    content_type = "linkedin_post"
+                                elif "reddit" in link.lower():
+                                    content_type = "reddit_comment"
+                                link_content = await self.scrape_url(link, team_id, user_id, content_type)
+                                scraped_items.append(link_content)
+                                processed_urls.add(link)
+                                await asyncio.sleep(0.5)
+                            except Exception as e:
+                                logging.warning(f"Failed to scrape discovered link {link}: {e}")
+                                continue
                 except Exception as e:
                     logging.warning(f"Failed to extract links from {url}: {e}")
-            
             # Step 4: Save all scraped content to database
             for item in scraped_items:
                 try:
                     await db.scraped_content.insert_one(item.dict())
                 except Exception as e:
                     logging.warning(f"Failed to save item {item.id} to database: {e}")
-            
+            # Optionally, you can return link_decisions for debugging
             return BulkScrapeResponse(
                 team_id=team_id,
                 items=scraped_items
             )
-            
         except Exception as e:
             logging.error(f"Bulk scraping failed for {url}: {e}")
             raise HTTPException(status_code=500, detail=f"Bulk scraping failed: {str(e)}")
@@ -420,13 +432,11 @@ class ContentScraper:
             best_content = None
             best_word_count = 0
             extraction_methods_tried = []
-            
             # Method 1: Try newspaper3k first
             try:
                 article = Article(url)
                 article.download()
                 article.parse()
-                
                 if article.text and len(article.text.strip()) > 50:
                     word_count = len(article.text.split())
                     if word_count > best_word_count:
@@ -442,7 +452,6 @@ class ContentScraper:
                     logging.info(f"Newspaper3k extracted {word_count} words from {url}")
             except Exception as e:
                 logging.warning(f"Newspaper3k failed for {url}: {e}")
-            
             # Method 2: Try trafilatura
             try:
                 downloaded = trafilatura.fetch_url(url)
@@ -451,11 +460,9 @@ class ContentScraper:
                     if text and len(text.strip()) > 50:
                         word_count = len(text.split())
                         if word_count > best_word_count:
-                            # Try to extract metadata
                             metadata = trafilatura.extract_metadata(downloaded)
                             title = metadata.title if metadata and metadata.title else self._extract_title_from_url(url)
                             author = metadata.author if metadata and metadata.author else None
-                            
                             best_content = {
                                 "title": title,
                                 "content": text,
@@ -468,23 +475,25 @@ class ContentScraper:
                         logging.info(f"Trafilatura extracted {word_count} words from {url}")
             except Exception as e:
                 logging.warning(f"Trafilatura failed for {url}: {e}")
-            
-            # Method 3: Try requests + readability
+            # Method 3: Try requests + readability with advanced headers
             try:
-                response = requests.get(url, timeout=30, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                })
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': url,
+                    'DNT': '1',
+                    'Upgrade-Insecure-Requests': '1',
+                }
+                response = requests.get(url, timeout=30, headers=headers)
                 response.raise_for_status()
-                
                 doc = Document(response.text)
                 title = doc.title()
                 content_html = doc.summary()
-                
                 if content_html and len(content_html.strip()) > 50:
                     content_text = self.h.handle(content_html)
                     content_text = self._clean_markdown(content_text)
                     word_count = len(content_text.split())
-                    
                     if word_count > best_word_count:
                         best_content = {
                             "title": title or self._extract_title_from_url(url),
@@ -498,52 +507,51 @@ class ContentScraper:
                     logging.info(f"Readability extracted {word_count} words from {url}")
             except Exception as e:
                 logging.warning(f"Readability method failed for {url}: {e}")
-            
             # Method 4: Gemini AI Fallback (if other methods failed or returned poor results)
-            if not best_content or best_word_count < 100:
+            if (not best_content or best_word_count < 100) and self.gemini_model:
                 try:
-                    gemini_result = self._extract_content_with_gemini(url)
-                    if gemini_result and gemini_result.get("content"):
-                        word_count = len(gemini_result["content"].split())
-                        if word_count > best_word_count:
-                            best_content = {
-                                "title": gemini_result.get("title") or self._extract_title_from_url(url),
-                                "content": gemini_result["content"],
-                                "author": gemini_result.get("author"),
-                                "method": "gemini-ai",
-                                "word_count": word_count
-                            }
-                            best_word_count = word_count
-                            content_type = gemini_result.get("category", content_type)
-                        extraction_methods_tried.append("gemini-ai")
-                        logging.info(f"Gemini AI extracted {word_count} words from {url}")
+                    # Try Gemini with a direct fetch prompt
+                    prompt = f"""
+                    Fetch the content from the following URL and extract the main article, blog post, or guide. Return the result as JSON with keys: title, content (markdown), author (if found), and category. If the page is not accessible, return an error message.
+                    URL: {url}
+                    """
+                    ai_response = self.gemini_model.generate_content(prompt)
+                    if ai_response and ai_response.text:
+                        import json
+                        try:
+                            result = json.loads(ai_response.text.strip().split('\n')[0])
+                            if result.get("content"):
+                                best_content = {
+                                    "title": result.get("title") or self._extract_title_from_url(url),
+                                    "content": result["content"],
+                                    "author": result.get("author"),
+                                    "method": "gemini-direct-fetch",
+                                    "word_count": len(result["content"].split())
+                                }
+                                best_word_count = best_content["word_count"]
+                                extraction_methods_tried.append("gemini-direct-fetch")
+                        except Exception:
+                            pass
                 except Exception as e:
-                    logging.warning(f"Gemini AI extraction failed for {url}: {e}")
-            
+                    logging.warning(f"Gemini direct fetch failed for {url}: {e}")
             if not best_content:
                 raise Exception(f"All extraction methods failed. Tried: {', '.join(extraction_methods_tried)}")
-            
             # Enhance content with Gemini if available and content is decent
             enhanced_result = self._enhance_content_with_gemini(best_content["content"], url)
             if enhanced_result.get("enhanced"):
-                # Use Gemini enhancements
                 final_content = enhanced_result.get("content", best_content["content"])
                 final_title = enhanced_result.get("title") or best_content["title"]
                 final_author = enhanced_result.get("author") or best_content["author"]
                 final_content_type = enhanced_result.get("category", content_type)
                 extraction_method = f"{best_content['method']}+gemini"
             else:
-                # Use original extraction
                 final_content = self._clean_and_convert_to_markdown(best_content["content"])
                 final_title = best_content["title"]
                 final_author = best_content["author"]
                 final_content_type = content_type
                 extraction_method = best_content["method"]
-            
             final_word_count = len(final_content.split())
-            
             logging.info(f"Final extraction: {final_word_count} words via {extraction_method}")
-            
             return ScrapedContent(
                 title=final_title,
                 content=final_content,
@@ -555,77 +563,123 @@ class ContentScraper:
                 word_count=final_word_count,
                 extraction_method=extraction_method
             )
-            
         except Exception as e:
             logging.error(f"Failed to scrape {url}: {e}")
             raise HTTPException(status_code=400, detail=f"Failed to scrape content from URL: {str(e)}")
     
-    async def scrape_pdf(self, file_content: bytes, filename: str, team_id: str, user_id: Optional[str] = None) -> ScrapedContent:
-        """
-        Extract text from PDF using multiple methods
-        """
+    async def scrape_pdf(self, file_content: bytes, filename: str, team_id: str, user_id: str = None) -> List[Dict]:
+        """Extract text from PDF, split into logical chunks, and return as a list of markdown items."""
+        items = []
         try:
-            # Method 1: Try PyMuPDF first
-            try:
-                doc = fitz.open(stream=file_content, filetype="pdf")
-                text_content = ""
-                
-                for page_num in range(len(doc)):
-                    page = doc.load_page(page_num)
-                    text_content += page.get_text() + "\n\n"
-                
-                doc.close()
-                
-                if text_content.strip() and len(text_content.strip()) > 100:
-                    content_markdown = self._clean_and_convert_to_markdown(text_content)
-                    word_count = len(text_content.split())
-                    
-                    return ScrapedContent(
-                        title=filename.replace('.pdf', ''),
-                        content=content_markdown,
-                        content_type="pdf",
-                        source_url=None,
-                        author=None,
-                        user_id=user_id,
-                        team_id=team_id,
-                        word_count=word_count,
-                        extraction_method="pymupdf"
-                    )
-            except Exception as e:
-                logging.warning(f"PyMuPDF failed for {filename}: {e}")
-            
-            # Method 2: Try pdfplumber
-            try:
-                with pdfplumber.open(file_content) as pdf:
-                    text_content = ""
-                    for page in pdf.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_content += page_text + "\n\n"
-                
-                if text_content.strip() and len(text_content.strip()) > 100:
-                    content_markdown = self._clean_and_convert_to_markdown(text_content)
-                    word_count = len(text_content.split())
-                    
-                    return ScrapedContent(
-                        title=filename.replace('.pdf', ''),
-                        content=content_markdown,
-                        content_type="pdf",
-                        source_url=None,
-                        author=None,
-                        user_id=user_id,
-                        team_id=team_id,
-                        word_count=word_count,
-                        extraction_method="pdfplumber"
-                    )
-            except Exception as e:
-                logging.warning(f"pdfplumber failed for {filename}: {e}")
-            
-            raise Exception("All PDF extraction methods failed")
-            
+            with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                # 1. Try to detect TOC and chunk by it
+                toc = self._detect_toc(pdf)
+                if toc:
+                    for i, (title, start_page) in enumerate(toc):
+                        end_page = toc[i+1][1] if i+1 < len(toc) else len(pdf.pages)
+                        content = self._extract_text_range(pdf, start_page, end_page)
+                        if len(content.strip()) > 50:
+                            items.append({
+                                "title": title,
+                                "content": self._clean_and_convert_to_markdown(content),
+                                "content_type": "book",
+                                "source_url": filename,
+                                "author": "",
+                                "user_id": user_id or ""
+                            })
+                    if items:
+                        return items
+                # 2. Try to chunk by headings
+                heading_chunks = self._chunk_by_headings(pdf)
+                if len(heading_chunks) >= 3:
+                    for i, (title, content, page_range) in enumerate(heading_chunks):
+                        if len(content.strip()) > 50:
+                            items.append({
+                                "title": title or f"Section {i+1} (pages {page_range})",
+                                "content": self._clean_and_convert_to_markdown(content),
+                                "content_type": "book",
+                                "source_url": filename,
+                                "author": "",
+                                "user_id": user_id or ""
+                            })
+                    if items:
+                        return items
+                # 3. Fallback: adaptive chunking by content size
+                adaptive_chunks = self._adaptive_chunking(pdf)
+                for i, (content, page_range) in enumerate(adaptive_chunks):
+                    if len(content.strip()) > 50:
+                        items.append({
+                            "title": f"Chunk {i+1} (pages {page_range})",
+                            "content": self._clean_and_convert_to_markdown(content),
+                            "content_type": "book",
+                            "source_url": filename,
+                            "author": "",
+                            "user_id": user_id or ""
+                        })
         except Exception as e:
-            logging.error(f"Failed to extract text from PDF {filename}: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to extract text from PDF: {str(e)}")
+            logging.error(f"Failed to scrape PDF {filename}: {e}")
+        return items
+
+    def _detect_toc(self, pdf) -> List:
+        toc = []
+        toc_pattern = re.compile(r'([A-Z][\w\s\-:]+)\s+\.{2,}\s*(\d+)$')
+        for page_num in range(min(10, len(pdf.pages))):
+            text = pdf.pages[page_num].extract_text() or ""
+            for line in text.splitlines():
+                match = toc_pattern.match(line.strip())
+                if match:
+                    title = match.group(1).strip()
+                    page = int(match.group(2)) - 1
+                    if len(title) > 5 and 0 <= page < len(pdf.pages):
+                        toc.append((title, page))
+        return sorted(toc, key=lambda x: x[1]) if len(toc) >= 3 else []
+
+    def _extract_text_range(self, pdf, start_page: int, end_page: int) -> str:
+        content = ""
+        for i in range(start_page, min(end_page, len(pdf.pages))):
+            page_text = pdf.pages[i].extract_text() or ""
+            content += page_text + "\n"
+        return content
+
+    def _chunk_by_headings(self, pdf) -> List:
+        chunks = []
+        current_title = None
+        current_content = ""
+        start_page = 0
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            lines = text.splitlines()
+            found_heading = False
+            for line in lines:
+                line = line.strip()
+                if (line.isupper() and len(line) > 5) or re.match(r'^\d+\.\s+[A-Z]', line):
+                    if current_content.strip():
+                        chunks.append((current_title, current_content.strip(), f"{start_page+1}-{i}"))
+                    current_title = line
+                    current_content = ""
+                    start_page = i
+                    found_heading = True
+                    break
+            if not found_heading:
+                current_content += text + "\n"
+        if current_content.strip():
+            chunks.append((current_title, current_content.strip(), f"{start_page+1}-{len(pdf.pages)}"))
+        return chunks
+
+    def _adaptive_chunking(self, pdf, target_chunk_size=8000) -> List:
+        chunks = []
+        current_content = ""
+        start_page = 0
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            current_content += text + "\n"
+            if len(current_content) > target_chunk_size:
+                chunks.append((current_content.strip(), f"{start_page+1}-{i+1}"))
+                current_content = ""
+                start_page = i + 1
+        if current_content.strip():
+            chunks.append((current_content.strip(), f"{start_page+1}-{len(pdf.pages)}"))
+        return chunks
     
     def _clean_and_convert_to_markdown(self, text: str) -> str:
         """Clean and convert text to markdown format"""
@@ -706,8 +760,12 @@ async def bulk_scrape_endpoint(request: BulkScrapeRequest):
     Scrape a URL and discover/follow links to scrape additional content
     """
     try:
+        # Normalize URL: prepend https:// if missing scheme
+        url = request.url
+        if not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url.lstrip(":/")
         result = await scraper.bulk_scrape_with_links(
-            url=request.url,
+            url=url,
             team_id=request.team_id,
             user_id=request.user_id,
             max_depth=request.max_depth,
@@ -729,8 +787,12 @@ async def scrape_url_endpoint(request: ScrapeUrlRequest):
     Scrape content from a URL
     """
     try:
+        # Normalize URL: prepend https:// if missing scheme
+        url = request.url
+        if not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url.lstrip(":/")
         scraped_content = await scraper.scrape_url(
-            url=request.url,
+            url=url,
             team_id=request.team_id,
             user_id=request.user_id,
             content_type=request.content_type
@@ -759,53 +821,32 @@ async def scrape_url_endpoint(request: ScrapeUrlRequest):
         )
 
 
-@api_router.post("/scrape-pdf", response_model=ScrapeResponse)
+@api_router.post("/scrape-pdf")
 async def scrape_pdf_endpoint(
     team_id: str = Form(...),
-    user_id: Optional[str] = Form(None),
+    user_id: str = Form(None),
     file: UploadFile = File(...)
 ):
     """
-    Extract text from uploaded PDF
+    Extract text from uploaded PDF, split into chapters/chunks, and return as JSON array
     """
     try:
         if not file.filename.lower().endswith('.pdf'):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        # Read file content
         file_content = await file.read()
-        
-        if len(file_content) > 50 * 1024 * 1024:  # 50MB limit
+        if len(file_content) > 50 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File too large (max 50MB)")
-        
-        scraped_content = await scraper.scrape_pdf(
+        items = await scraper.scrape_pdf(
             file_content=file_content,
             filename=file.filename,
             team_id=team_id,
             user_id=user_id
         )
-        
-        # Save to database
-        await db.scraped_content.insert_one(scraped_content.dict())
-        
-        return ScrapeResponse(
-            success=True,
-            message="PDF content extracted successfully",
-            data=scraped_content
-        )
-    
+        return { 'success': True, 'message': 'PDF content extracted and chunked successfully', 'items': items }
     except HTTPException as e:
-        return ScrapeResponse(
-            success=False,
-            message=str(e.detail),
-            data=None
-        )
+        return { 'success': False, 'message': str(e.detail), 'items': [] }
     except Exception as e:
-        return ScrapeResponse(
-            success=False,
-            message=f"Unexpected error: {str(e)}",
-            data=None
-        )
+        return { 'success': False, 'message': f"Unexpected error: {str(e)}", 'items': [] }
 
 
 @api_router.get("/knowledge-base", response_model=List[ScrapedContent])
@@ -842,6 +883,38 @@ async def delete_content(content_id: str, team_id: str):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete content: {str(e)}")
+
+
+@api_router.post("/scrapy-crawl")
+async def scrapy_crawl_endpoint(url: str, max_links: int = 10):
+    """
+    Run the Scrapy Gemini spider on the given URL and return the results as JSON.
+    """
+    import tempfile
+    import os
+    import json
+    # Create a temporary file for output
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as tmpfile:
+        output_path = tmpfile.name
+    # Build the Scrapy command
+    scrapy_cmd = [
+        "scrapy", "crawl", "gemini_spider",
+        "-a", f"start_url={url}",
+        "-a", f"max_links={max_links}",
+        "-o", output_path
+    ]
+    # Run the Scrapy spider as a subprocess
+    proc = subprocess.run(scrapy_cmd, cwd="./gemini_crawler", capture_output=True, text=True)
+    # Read the output JSON
+    try:
+        with open(output_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        data = []
+    # Clean up the temp file
+    os.remove(output_path)
+    # Optionally, include Scrapy logs in the response for debugging
+    return {"results": data, "scrapy_stdout": proc.stdout, "scrapy_stderr": proc.stderr}
 
 
 # Include the router in the main app
